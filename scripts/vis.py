@@ -1,0 +1,183 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+"""
+Perform image traversals using a trained MERU or CLIP model, and a pool of
+text (and their encoded text representations).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import io
+
+import torch
+from PIL import Image
+from torchvision import transforms as T
+
+from meru import lorentz as L
+from meru.config import LazyConfig, LazyFactory
+from meru.models import MERU, CLIPBaseline
+from meru.tokenizer import Tokenizer
+from meru.utils.checkpointing import CheckpointManager
+
+from torchvision.datasets import CocoDetection
+from torch.utils.data import DataLoader
+from pathlib import Path
+from tqdm import tqdm
+os.environ['HF_DATASETS_OFFLINE '] = "1" 
+import datasets as ds
+import matplotlib.pyplot as plt 
+import webdataset as wds
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+_AA = parser.add_argument
+_AA("--dataset-name", help="mscoco, datacomp-small.")
+_AA("--meru-checkpoint-path", help="Path to checkpoint of a trained MERU model.")
+_AA("--clip-checkpoint-path", help="Path to checkpoint of a trained CLIP model.")
+_AA("--dataset-path", help="Path to the image-text dataset.") 
+# /local1/datasets/datacomp_small or /local1/multi-modal-datasets/mscoco/
+_AA("--meru-train-config", help="Path to train config (.yaml/py) for given checkpoint.")
+_AA("--clip-train-config", help="Path to train config (.yaml/py) for given checkpoint.")
+
+def calc_scores(
+    model, image_feats: torch.Tensor, text_feats: torch.Tensor, has_root: bool
+):
+    """
+    Calculate similarity scores between the given image and text features depending
+    on model type.
+
+    Args:
+        has_root: Flag to indicate whether the last text embedding (at dim=0)
+            is the `[ROOT]` embedding.
+    """
+
+    if isinstance(model, MERU):
+        # using meru scores
+        # scores = L.pairwise_inner(image_feats, text_feats, model.curv.exp())
+        # using time dimension
+        scores = [[]]
+        for x in text_feats:
+            x_time = torch.sqrt(1 / model.curv.exp() + torch.sum(x**2, dim=-1, keepdim=True))
+            scores[0].append(x_time)
+
+        # For MERU, exclude text embeddings that do not entail the given image.
+        # _aper = L.half_aperture(text_feats, model.curv.exp())
+        # _oxy_angle = L.oxy_angle(
+        #     text_feats[:, None, :], image_feats[None, :, :], model.curv.exp()
+        # )
+        # entailment_energy = _oxy_angle - _aper[..., None]
+
+        # # Root entails everything.
+        # if has_root:
+        #     entailment_energy[-1, ...] = 0
+
+        # Set a large negative score if text does not entail image.  
+        # scores[entailment_energy.T > 0] = -1e12
+        return scores
+    else:
+        # model is not needed here.
+        return image_feats @ text_feats.T
+
+@torch.inference_mode()
+def loader(dataset_name):
+    if dataset_name == "mscoco":
+        ds.config.DOWNLOADED_DATASETS_PATH = Path(_A.dataset_path)
+        dataset = ds.load_dataset("clip-benchmark/wds_mscoco_captions2017")
+        train_data = dataset["train"]
+        test_data = dataset["test"]
+
+        train_data.shuffle(seed=42)
+        test_data.shuffle(seed=42)
+        return train_data, test_data
+    elif dataset_name == "datacomp-small":
+        dataset = wds.WebDataset("/local1/datasets/datacomp_small/shards/00000564.tar")
+        return dataset, None
+    else:
+        return None, None
+
+@torch.inference_mode()
+def main(_A: argparse.Namespace):
+    # Get the current device (this will be `cuda:0` here by default) or use CPU.
+    device = (
+        torch.cuda.current_device()
+        if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
+
+    # Create the model using training config and load pre-trained weights.
+    _C_TRAIN_MERU = LazyConfig.load(_A.meru_train_config)
+    _C_TRAIN_CLIP = LazyConfig.load(_A.clip_train_config)
+    model_meru = LazyFactory.build_model(_C_TRAIN_MERU, device).eval()
+    model_clip = LazyFactory.build_model(_C_TRAIN_CLIP, device).eval()
+
+    CheckpointManager(model=model_meru).load(_A.meru_checkpoint_path)
+    CheckpointManager(model=model_clip).load(_A.clip_checkpoint_path)
+
+    root_feat_meru = torch.zeros(_C_TRAIN_MERU.model.embed_dim, device=device)
+    root_feat_clip = torch.load(_A.clip_checkpoint_path)["root"].to(device)
+
+    train_data, test_data = loader(_A.dataset_name)
+
+    # MSCOCO
+    # print(len(train_data)) 118287
+    # print(len(test_data)) 5000
+
+    tokenizer = Tokenizer()
+    image_transform = T.Compose(
+            [T.Resize(224, T.InterpolationMode.BICUBIC), T.CenterCrop(224), T.ToTensor()]
+        )
+    
+    meru_score_collection = []
+    clip_score_collection = []
+
+    for sample in tqdm(train_data):
+        if _A.dataset_name == "mscoco":
+            img = sample['jpg']
+            txts = sample['txt'].split("\n")
+        elif _A.dataset_name == "datacomp-small":
+            img = sample['jpg']
+            txts = [sample['txt'].decode()]
+            img = Image.open(io.BytesIO(img)).convert("RGB")
+
+        img_tr = image_transform(img).to(device)
+        img_feat = model_meru.encode_image(img_tr[None, ...], project=True)[0]
+
+        txt_tokenized = tokenizer(txts)
+        txt_feats = model_meru.encode_text(txt_tokenized, project=True)
+
+        scores_meru = calc_scores(model_meru, img_feat[None, ...], txt_feats, has_root=False)
+        scores_clip = calc_scores(model_clip, img_feat[None, ...], txt_feats, has_root=False)
+        
+        for i, score in enumerate(zip(scores_meru[0], scores_clip[0])):
+            score_meru, score_clip = score
+            score_meru = score_meru.item()
+            score_clip = score_clip.item()
+            if score_clip >= 0.2 and score_meru < 3.19:
+                img.save("examples-mscoco/"+sample["__key__"]+"-"+txts[i]+"-"+str(score_clip)+"-"+str(score_meru)+".jpg")
+            meru_score_collection.append(score_meru)
+            clip_score_collection.append(score_clip)
+
+        # words = []
+        # for txt in txts:
+        #     words += txt.split(" ")
+        # words_tokenized = tokenizer(words)
+        # words_feats = model_meru.encode_text(words_tokenized, project=True)
+        
+        # word_scores = calc_scores(model_meru, img_feat[None, ...], words_feats, has_root=False)
+        # for score in word_scores[0]:
+        #     f.write(str(score.item())+" ")
+        # f.write("\n")
+        if len(meru_score_collection) > 5000:
+            break
+
+    # "[ROOT]"
+
+if __name__ == "__main__":
+    _A = parser.parse_args()
+    main(_A)

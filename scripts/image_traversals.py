@@ -56,6 +56,9 @@ def interpolate(model, feats: torch.Tensor, root_feat: torch.Tensor, steps: int)
         interp_feats = torch.nn.functional.normalize(interp_feats, dim=-1)
 
     # Reverse the traversal order: (image first, root last)
+    # for x in interp_feats:
+    #     x_time = torch.sqrt(1 / model.curv.exp() + torch.sum(x**2, dim=-1, keepdim=True))
+    #     print(x_time)
     return interp_feats.flip(0)
 
 
@@ -167,9 +170,12 @@ def main(_A: argparse.Namespace):
         [T.Resize(224, T.InterpolationMode.BICUBIC), T.CenterCrop(224), T.ToTensor()]
     )
     image = image_transform(image).to(device)
+    # print(image.shape) torch.Size([3, 224, 224])
     image_feats = model.encode_image(image[None, ...], project=True)[0]
 
     interp_feats = interpolate(model, image_feats, root_feat, _A.steps)
+    # print(image_feats.shape, interp_feats.shape, text_feats_pool.shape)
+    # torch.Size([512]) torch.Size([50, 512]) torch.Size([752, 512])
     nn1_scores = calc_scores(model, interp_feats, text_feats_pool, has_root=True)
 
     nn1_scores, _nn1_idxs = nn1_scores.max(dim=-1)
