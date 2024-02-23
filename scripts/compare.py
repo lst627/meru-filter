@@ -88,6 +88,7 @@ def calc_scores(
 def loader(dataset_name):
     if dataset_name == "mscoco":
         ds.config.DOWNLOADED_DATASETS_PATH = Path(_A.dataset_path)
+        ds.config.HF_DATASETS_CACHE = Path(_A.dataset_path)
         dataset = ds.load_dataset("clip-benchmark/wds_mscoco_captions2017")
         train_data = dataset["train"]
         test_data = dataset["test"]
@@ -96,7 +97,7 @@ def loader(dataset_name):
         test_data.shuffle(seed=42)
         return train_data, test_data
     elif dataset_name == "datacomp-small":
-        dataset = wds.WebDataset("/local1/datasets/datacomp_small/shards/00000564.tar")
+        dataset = wds.WebDataset(os.path.join(_A.dataset_path,"shards/00000564.tar"))
         return dataset, None
     else:
         return None, None

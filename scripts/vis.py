@@ -29,11 +29,11 @@ from torchvision.datasets import CocoDetection
 from torch.utils.data import DataLoader
 from pathlib import Path
 from tqdm import tqdm
-os.environ['HF_DATASETS_OFFLINE '] = "1" 
+os.environ['HF_DATASETS_OFFLINE'] = "1" 
 import datasets as ds
+from datasets import Dataset
 import matplotlib.pyplot as plt 
 import webdataset as wds
-
 
 parser = argparse.ArgumentParser(description=__doc__)
 _AA = parser.add_argument
@@ -41,7 +41,6 @@ _AA("--dataset-name", help="mscoco, datacomp-small.")
 _AA("--meru-checkpoint-path", help="Path to checkpoint of a trained MERU model.")
 _AA("--clip-checkpoint-path", help="Path to checkpoint of a trained CLIP model.")
 _AA("--dataset-path", help="Path to the image-text dataset.") 
-# /local1/datasets/datacomp_small or /local1/multi-modal-datasets/mscoco/
 _AA("--meru-train-config", help="Path to train config (.yaml/py) for given checkpoint.")
 _AA("--clip-train-config", help="Path to train config (.yaml/py) for given checkpoint.")
 
@@ -88,6 +87,7 @@ def calc_scores(
 def loader(dataset_name):
     if dataset_name == "mscoco":
         ds.config.DOWNLOADED_DATASETS_PATH = Path(_A.dataset_path)
+        ds.config.HF_DATASETS_CACHE = Path(_A.dataset_path)
         dataset = ds.load_dataset("clip-benchmark/wds_mscoco_captions2017")
         train_data = dataset["train"]
         test_data = dataset["test"]
@@ -96,7 +96,7 @@ def loader(dataset_name):
         test_data.shuffle(seed=42)
         return train_data, test_data
     elif dataset_name == "datacomp-small":
-        dataset = wds.WebDataset("/local1/datasets/datacomp_small/shards/00000564.tar")
+        dataset = wds.WebDataset(os.path.join(_A.dataset_path,"shards/00000564.tar"))
         return dataset, None
     else:
         return None, None
@@ -123,11 +123,10 @@ def main(_A: argparse.Namespace):
     root_feat_clip = torch.load(_A.clip_checkpoint_path)["root"].to(device)
 
     train_data, test_data = loader(_A.dataset_name)
-
+    
     # MSCOCO
     # print(len(train_data)) 118287
     # print(len(test_data)) 5000
-
     tokenizer = Tokenizer()
     image_transform = T.Compose(
             [T.Resize(224, T.InterpolationMode.BICUBIC), T.CenterCrop(224), T.ToTensor()]
