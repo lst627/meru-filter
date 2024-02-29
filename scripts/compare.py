@@ -89,13 +89,8 @@ def loader(dataset_name):
     if dataset_name == "mscoco":
         ds.config.DOWNLOADED_DATASETS_PATH = Path(_A.dataset_path)
         ds.config.HF_DATASETS_CACHE = Path(_A.dataset_path)
-        dataset = ds.load_dataset("clip-benchmark/wds_mscoco_captions2017")
-        train_data = dataset["train"]
-        test_data = dataset["test"]
-
-        train_data.shuffle(seed=42)
-        test_data.shuffle(seed=42)
-        return train_data, test_data
+        dataset = ds.load_dataset("ChristophSchuhmann/MS_COCO_2017_URL_TEXT")
+        return dataset['train'], None
     elif dataset_name == "datacomp-small":
         dataset = wds.WebDataset(os.path.join(_A.dataset_path,"shards/00000564.tar"))
         return dataset, None
@@ -139,43 +134,35 @@ def main(_A: argparse.Namespace):
 
     for sample in tqdm(train_data):
         if _A.dataset_name == "mscoco":
-            img = sample['jpg']
-            txts = sample['txt'].split("\n")
+            imgpath = sample['URL'][-26:]
+            img = Image.open(os.path.join(_A.dataset_path, 'train2017', imgpath)).convert("RGB")
+            txts = [sample['TEXT']]
         elif _A.dataset_name == "datacomp-small":
             img = sample['jpg']
-            txts = [sample['txt'].decode()]
             img = Image.open(io.BytesIO(img)).convert("RGB")
+            txts = [sample['txt'].decode()]
 
-        img = image_transform(img).to(device)
-        img_feat = model_meru.encode_image(img[None, ...], project=True)[0]
-
+        img_tr = image_transform(img).to(device)
+        img_feat = model_meru.encode_image(img_tr[None, ...], project=True)[0]
         txt_tokenized = tokenizer(txts)
         txt_feats = model_meru.encode_text(txt_tokenized, project=True)
-
         scores_meru = calc_scores(model_meru, img_feat[None, ...], txt_feats, has_root=False)
+        
+        img_feat = model_clip.encode_image(img_tr[None, ...], project=True)[0]
+        txt_feats = model_clip.encode_text(txt_tokenized, project=True)
         scores_clip = calc_scores(model_clip, img_feat[None, ...], txt_feats, has_root=False)
         
         for score_meru, score_clip in zip(scores_meru[0], scores_clip[0]):
             meru_score_collection.append(score_meru.item())
             clip_score_collection.append(score_clip.item())
 
-        # words = []
-        # for txt in txts:
-        #     words += txt.split(" ")
-        # words_tokenized = tokenizer(words)
-        # words_feats = model_meru.encode_text(words_tokenized, project=True)
-        
-        # word_scores = calc_scores(model_meru, img_feat[None, ...], words_feats, has_root=False)
-        # for score in word_scores[0]:
-        #     f.write(str(score.item())+" ")
-        # f.write("\n")
         if len(meru_score_collection) > 5000:
             break
 
     plt.figure(figsize=(6,6))
     plt.scatter(meru_score_collection[:5000], clip_score_collection[:5000], s=1)
     plt.xlabel("x_time")
-    plt.ylabel("CLIP Scores")
+    plt.ylabel("CLIP Score")
     plt.show()
     plt.savefig("./"+_A.dataset_name+"-time.pdf")
 

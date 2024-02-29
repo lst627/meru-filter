@@ -29,11 +29,12 @@ from torchvision.datasets import CocoDetection
 from torch.utils.data import DataLoader
 from pathlib import Path
 from tqdm import tqdm
-os.environ['HF_DATASETS_OFFLINE'] = "1" 
+# os.environ['HF_DATASETS_OFFLINE'] = "1" 
 import datasets as ds
 from datasets import Dataset
 import matplotlib.pyplot as plt 
 import webdataset as wds
+import pandas as pd
 
 parser = argparse.ArgumentParser(description=__doc__)
 _AA = parser.add_argument
@@ -88,18 +89,14 @@ def loader(dataset_name):
     if dataset_name == "mscoco":
         ds.config.DOWNLOADED_DATASETS_PATH = Path(_A.dataset_path)
         ds.config.HF_DATASETS_CACHE = Path(_A.dataset_path)
-        dataset = ds.load_dataset("clip-benchmark/wds_mscoco_captions2017")
-        train_data = dataset["train"]
-        test_data = dataset["test"]
+        dataset = ds.load_dataset("ChristophSchuhmann/MS_COCO_2017_URL_TEXT")
+        return dataset['train']
 
-        train_data.shuffle(seed=42)
-        test_data.shuffle(seed=42)
-        return train_data, test_data
     elif dataset_name == "datacomp-small":
         dataset = wds.WebDataset(os.path.join(_A.dataset_path,"shards/00000564.tar"))
-        return dataset, None
+        return dataset
     else:
-        return None, None
+        return None
 
 @torch.inference_mode()
 def main(_A: argparse.Namespace):
@@ -122,7 +119,7 @@ def main(_A: argparse.Namespace):
     root_feat_meru = torch.zeros(_C_TRAIN_MERU.model.embed_dim, device=device)
     root_feat_clip = torch.load(_A.clip_checkpoint_path)["root"].to(device)
 
-    train_data, test_data = loader(_A.dataset_name)
+    train_data = loader(_A.dataset_name)
     
     # MSCOCO
     # print(len(train_data)) 118287
@@ -137,41 +134,36 @@ def main(_A: argparse.Namespace):
 
     for sample in tqdm(train_data):
         if _A.dataset_name == "mscoco":
-            img = sample['jpg']
-            txts = sample['txt'].split("\n")
+            imgpath = sample['URL'][-26:]
+            img = Image.open(os.path.join(_A.dataset_path, 'train2017', imgpath)).convert("RGB")
+            txts = [sample['TEXT']]
         elif _A.dataset_name == "datacomp-small":
             img = sample['jpg']
-            txts = [sample['txt'].decode()]
             img = Image.open(io.BytesIO(img)).convert("RGB")
+            txts = [sample['txt'].decode()]
 
         img_tr = image_transform(img).to(device)
         img_feat = model_meru.encode_image(img_tr[None, ...], project=True)[0]
-
         txt_tokenized = tokenizer(txts)
         txt_feats = model_meru.encode_text(txt_tokenized, project=True)
-
         scores_meru = calc_scores(model_meru, img_feat[None, ...], txt_feats, has_root=False)
+        
+        img_feat = model_clip.encode_image(img_tr[None, ...], project=True)[0]
+        txt_feats = model_clip.encode_text(txt_tokenized, project=True)
         scores_clip = calc_scores(model_clip, img_feat[None, ...], txt_feats, has_root=False)
         
         for i, score in enumerate(zip(scores_meru[0], scores_clip[0])):
             score_meru, score_clip = score
             score_meru = score_meru.item()
             score_clip = score_clip.item()
-            if score_clip >= 0.2 and score_meru < 3.19:
-                img.save("examples-mscoco/"+sample["__key__"]+"-"+txts[i]+"-"+str(score_clip)+"-"+str(score_meru)+".jpg")
+            if score_clip >= 0.3 and score_meru < 3.20:
+                if _A.dataset_name == "datacomp-small":
+                    img.save("examples-datacomp-small-0.3-3.20/"+sample["__key__"]+"-"+txts[i]+"-"+str(score_clip)+"-"+str(score_meru)+".jpg")
+                elif _A.dataset_name == "mscoco":
+                    img.save("examples-mscoco-0.3-3.20/"+sample["URL"][-16:-4]+"-"+txts[i]+"-"+str(score_clip)+"-"+str(score_meru)+".jpg")
             meru_score_collection.append(score_meru)
             clip_score_collection.append(score_clip)
 
-        # words = []
-        # for txt in txts:
-        #     words += txt.split(" ")
-        # words_tokenized = tokenizer(words)
-        # words_feats = model_meru.encode_text(words_tokenized, project=True)
-        
-        # word_scores = calc_scores(model_meru, img_feat[None, ...], words_feats, has_root=False)
-        # for score in word_scores[0]:
-        #     f.write(str(score.item())+" ")
-        # f.write("\n")
         if len(meru_score_collection) > 5000:
             break
 

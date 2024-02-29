@@ -130,6 +130,18 @@ def get_text_feats(model: MERU | CLIPBaseline) -> tuple[list[str], torch.Tensor]
         *pexels_text["nouns"],
         *pexels_text["adjectives"],
     ]
+
+    # check the variance on different directions?
+    txt_time = []
+    for txt, x in zip(all_pexels_text, all_text_feats):
+        x_time = torch.sqrt(1 / model.curv.exp() + torch.sum(x**2, dim=-1, keepdim=True))
+        txt_time.append((txt, x_time.item()))
+    txt_time.sort(key=lambda x: x[1])
+    f = open("variance.txt", "w")
+    for txt,x in txt_time:
+        f.write(txt+' '+str(x)+'\n')
+    f.close()
+
     return all_pexels_text, all_text_feats
 
 
