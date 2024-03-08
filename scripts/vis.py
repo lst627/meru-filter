@@ -122,7 +122,7 @@ def main(_A: argparse.Namespace):
     train_data = loader(_A.dataset_name)
     
     # MSCOCO
-    # print(len(train_data)) 118287
+    # print(len(train_data)) ~ 600000
     # print(len(test_data)) 5000
     tokenizer = Tokenizer()
     image_transform = T.Compose(
@@ -164,7 +164,7 @@ def main(_A: argparse.Namespace):
             meru_score_collection.append(score_meru)
             clip_score_collection.append(score_clip)
 
-        if len(meru_score_collection) > 5000:
+        if len(meru_score_collection) > 9024:
             break
 
     # "[ROOT]"

@@ -121,8 +121,7 @@ def main(_A: argparse.Namespace):
     train_data, test_data = loader(_A.dataset_name)
 
     # MSCOCO
-    # print(len(train_data)) 118287
-    # print(len(test_data)) 5000
+    # print(len(train_data)) ~ 600000
 
     tokenizer = Tokenizer()
     image_transform = T.Compose(
@@ -156,11 +155,11 @@ def main(_A: argparse.Namespace):
             meru_score_collection.append(score_meru.item())
             clip_score_collection.append(score_clip.item())
 
-        if len(meru_score_collection) > 5000:
+        if len(meru_score_collection) > 9024:
             break
 
     plt.figure(figsize=(6,6))
-    plt.scatter(meru_score_collection[:5000], clip_score_collection[:5000], s=1)
+    plt.scatter(meru_score_collection[:9024], clip_score_collection[:9024], s=1)
     plt.xlabel("x_time")
     plt.ylabel("CLIP Score")
     plt.show()
