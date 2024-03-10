@@ -45,6 +45,7 @@ _AA("--clip-checkpoint-path", default="/gscratch/sewoong/ericsf/meru-filter/clip
 _AA("--dataset-path", default="/gscratch/scrubbed/ericsf/datacomp/shards/", help="Path to the image-text dataset.")
 _AA("--fraction", default=1)
 _AA("--reverse", default=False, action="store_true")
+_AA("--use-norm", default=False, action="store_true")
 # /local1/datasets/datacomp_small or /local1/multi-modal-datasets/mscoco/
 _AA("--meru-train-config", default="/gscratch/sewoong/ericsf/meru-filter/configs/train_meru_vit_l.py", help="Path to train config (.yaml/py) for given checkpoint.")
 _AA("--clip-train-config", default="/gscratch/sewoong/ericsf/meru-filter/configs/train_clip_vit_l.py", help="Path to train config (.yaml/py) for given checkpoint.")
@@ -54,7 +55,7 @@ image_transform = T.Compose(
 )
 
 def calc_scores(
-    model, image_feats: torch.Tensor, text_feats: torch.Tensor, has_root: bool
+    model, image_feats: torch.Tensor, text_feats: torch.Tensor, has_root: bool, use_norm: bool
 ):
     """
     Calculate similarity scores between the given image and text features depending
@@ -68,10 +69,16 @@ def calc_scores(
         # using meru scores
         # scores = L.pairwise_inner(image_feats, text_feats, model.curv.exp())
         # using time dimension
-        scores = [[]]
-        for x in text_feats:
-            x_time = torch.sqrt(1 / model.curv.exp() + torch.sum(x**2, dim=-1, keepdim=True))
-            scores[0].append(x_time)
+        if use_norm:
+            scores = []
+            for x in text_feats:
+                norm = torch.sqrt(torch.abs(L.pairwise_inner(x.unsqueeze(0), x.unsqueeze(0), model.curv.exp())))
+                scores.append(norm)
+        else:
+            scores = [[]]
+            for x in text_feats:
+                x_time = torch.sqrt(1 / model.curv.exp() + torch.sum(x**2, dim=-1, keepdim=True))
+                scores[0].append(x_time)
 
         # For MERU, exclude text embeddings that do not entail the given image.
         # _aper = L.half_aperture(text_feats, model.curv.exp())
@@ -138,6 +145,8 @@ def main(_A: argparse.Namespace):
     if _A.reverse:
         print("Reversing the order of tar files")
         tar_files = list(reversed(tar_files))
+        
+    print(f"Using norm: {_A.use_norm}")
 
     tokenizer = Tokenizer()
 
@@ -163,13 +172,13 @@ def main(_A: argparse.Namespace):
             img_feat = model_meru.encode_image(img_tr, project=True)[0]
             txt_tokenized = tokenizer(txts)
             txt_feats = model_meru.encode_text(txt_tokenized, project=True)
-            scores_meru = calc_scores(model_meru, img_feat, txt_feats, has_root=False)
+            scores_meru = calc_scores(model_meru, img_feat, txt_feats, has_root=False, use_norm=_A.use_norm)
 
             # img_feat = model_clip.encode_image(img_tr, project=True)[0]
             # txt_feats = model_clip.encode_text(txt_tokenized, project=True)
             # scores_clip = calc_scores(model_clip, img_feat, txt_feats, has_root=False)
 
-            meru_score_stack = torch.stack(scores_meru[0], dim=1).squeeze(0)
+            meru_score_stack = torch.stack(scores_meru[0], dim=1).squeeze(0) if not _A.use_norm else scores_meru
             for score_meru in meru_score_stack:
                 meru_score_collection.append(score_meru.item())
             # for score_meru, score_clip in zip(meru_score_stack, scores_clip):
@@ -179,8 +188,8 @@ def main(_A: argparse.Namespace):
         assert len(meru_score_collection) == len(meru_uid_collection)
         print(f"Sample meru score: {meru_score_collection[0]}")
         print(f"Sample uid: {meru_uid_collection[0]}")
-        print(f"Saves meru scores and uids to /gscratch/scrubbed/ericsf/datacomp/scores/meru-uids-and-xtimes-{tar_file}.pt")
-        torch.save(zip(meru_uid_collection, meru_score_collection), f"/gscratch/scrubbed/ericsf/datacomp/scores/meru-uids-and-xtimes-{tar_file}.pt")
+        print(f"Saves meru scores and uids to /gscratch/scrubbed/ericsf/datacomp/scores/meru-uids-and-{'norms' if _A.use_norm else 'xtimes'}-{tar_file}.pt")
+        torch.save(zip(meru_uid_collection, meru_score_collection), f"/gscratch/scrubbed/ericsf/datacomp/scores/meru-uids-and-{'norms' if _A.use_norm else 'xtimes'}-{tar_file}.pt")
 
 
 if __name__ == "__main__":
