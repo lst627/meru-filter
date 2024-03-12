@@ -1,0 +1,10 @@
+# pack-refs with: peeled fully-peeled sorted 
+bd3f61cc3e43fa8e02865cdc500d6c8b077ea04d refs/remotes/origin/baselines
+a93094983cf2e92fca56dfa10e5657053d9dacc0 refs/remotes/origin/detector
+20b3b6ef10490b03bc089b5549e731156e5d52fa refs/remotes/origin/download_datacomp_1b
+e042ab1eea8fa45d84d883a525061023741092be refs/remotes/origin/download_upstream
+7fdb5c653e70d9c6fcc63ac7c8c66843e7c6f3e8 refs/remotes/origin/main
+a431020eb2a6da093e1f2481f251a2c2481212e4 refs/remotes/origin/readme
+518150b53d1d6d5cf4e42559cfb49a3df2a754e8 refs/remotes/origin/revert-16-baselines
+aa20f16c259bdcde2bad459ea43c943a09bec838 refs/remotes/origin/style_fix
+4ab5579dffd37927258978f418e86d8bfbe00072 refs/remotes/origin/vqa
