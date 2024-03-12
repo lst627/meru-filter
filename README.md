@@ -50,3 +50,9 @@ torchrun --nproc_per_node your_ngpus train.py --scale small --data_dir your_subd
 python evaluate.py  --train_output_dir your_output_path --data_dir your_eval_set_path
 ```
 
+For the text length filtering, please use "text_length_as_x_time_intersect_clip_score" for the name parameter above.
+
+## Visualization
+
+The visualization codes are datacomp/density.ipynb and datacomp/plots.ipynb.
+
