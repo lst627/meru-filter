@@ -4,7 +4,7 @@
 
 ## Installation
 
-Please follow the installation guides provided by the official repository of MERU:
+Please follow the installation steps provided by the official repository of MERU:
 
 This code requires `python>=3.9`, as well as `pytorch>=1.7` and `torchvision>=0.8`.
 We recommend using [Conda](https://conda.io/docs/user-guide/install/download.html)
